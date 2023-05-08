@@ -1,0 +1,64 @@
+
+from airflow import DAG
+from airflow.operators.python_operator import PythonOperator
+from datetime import datetime, timedelta
+import monetdb.sql
+import subprocess
+
+# set up a connection to the MonetDB server
+conn = monetdb.sql.connect(username='your_username', password='your_password', hostname='your_host', database='your_database')
+
+# define a Python callable that contains the code to execute
+def execute_monetdb_query():
+    # create a cursor object to execute SQL statements
+    cursor = conn.cursor()
+
+    # execute a SELECT statement to retrieve a single column from a table
+    query = 'SELECT your_column, dag_flag FROM your_table'
+    cursor.execute(query)
+
+    # fetch the result and get the first item and dag_flag
+    result, dag_flag = cursor.fetchone()
+
+    # convert the result to an integer
+    result = int(result)
+
+    if result == 1 and dag_flag != 1:
+        # trigger an Airflow DAG using the `airflow` CLI command
+        dag_id = 'your_dag_id'  # replace with the ID of your DAG
+        subprocess.run(['airflow', 'dags', 'trigger', dag_id])
+
+        # update the dag_flag column to 1 using an UPDATE statement
+        update_query = "UPDATE your_table SET dag_flag = 1 WHERE your_column = %s"
+        cursor.execute(update_query, (result,))
+        conn.commit()
+
+    # close the cursor
+    cursor.close()
+
+# define the DAG object
+default_args = {
+    'owner': 'your_name',
+    'start_date': datetime(2023, 5, 9),
+    'retries': 0,
+    'retry_delay': timedelta(minutes=5),
+}
+dag = DAG(
+    'your_dag_id',  # replace with a unique ID for your DAG
+    default_args=default_args,
+    schedule_interval='*/5 * * * *',  # run the DAG every 5 minutes
+    catchup=False,
+)
+
+# define the PythonOperator that runs the code
+execute_query_task = PythonOperator(
+    task_id='execute_monetdb_query',
+    python_callable=execute_monetdb_query,
+    dag=dag,
+)
+
+# set the order of the tasks
+execute_query_task
+
+# close the connection
+conn.close()
